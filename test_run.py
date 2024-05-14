@@ -50,6 +50,7 @@ if __name__ == '__main__':
         data = stream.get_frame()
         # print("Frame: ")
         #print(len(data.objects))
+        print('hi')
         print(data.timestamp)
         for obj in data.objects:
             '''print(time(), obj)'''
