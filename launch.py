@@ -62,7 +62,7 @@ def get_lidar_data():
         print(f"Error: {e}")
 
 
-def get_metadata():
+def get_meta_data():
     try:
         while True:
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -160,7 +160,7 @@ if __name__ == '__main__':
         lidar_thread.start()
         
         # Start Metadata acquisition thread
-        metadata_thread = threading.Thread(target=get_metadata)
+        metadata_thread = threading.Thread(target=get_meta_data)
         metadata_thread.start()
 
         # Join threads
