@@ -43,7 +43,8 @@ def get_lidar_data():
                     obj.centerX = obj.centerX + sensorLoc.x
                     obj.centerY = -obj.centerY + sensorLoc.y
                     # Write object data to CSV 
-                    rowdata = [data.timestamp, 
+                    rowdata = [data.timestamp,
+                                None, 
                                 None,  # Meta data placeholders
                                 None, 
                                 None,
@@ -91,7 +92,7 @@ if __name__ == '__main__':
     with open(csv_filename, mode='w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         # Write header
-        csv_writer.writerow(["Timestamp", "MetaX", "MetaY", "MetaZ", 
+        csv_writer.writerow(["TimestampLidar", "TimestampMeta", "MetaX", "MetaY", "MetaZ", 
                              "LidarID", "LidarX", "LidarY", "Width", 
                              "Length", "Rotation", "ClassType", 
                              "Height"])
@@ -127,7 +128,8 @@ if __name__ == '__main__':
                             # Process the coordinates as needed
                             meta_x, meta_y, meta_z = coordinates
                             # Write Meta data to CSV 
-                            rowdata = [datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"), 
+                            rowdata = [None,
+                                datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"), 
                                         meta_x, 
                                         meta_y, 
                                         meta_z,
