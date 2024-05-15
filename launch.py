@@ -61,8 +61,66 @@ def get_lidar_data():
     except Exception as e:
         print(f"Error: {e}")
 
-if __name__ == '__main__':
+
+def get_metadata():
     try:
+        while True:
+            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.bind((host, port))
+            server_socket.listen(1)
+
+            print(f"Listening for Unity on {host}:{port}")
+
+            client_socket, client_address = server_socket.accept()
+            print(f"Accepted connection from {client_address}")
+
+            try:
+                while True:
+                    data = client_socket.recv(1024).decode('utf-8')
+                    if not data:
+                        break
+
+                    # Process data from Unity
+                    start = data.find('(')
+                    end = data.find(')')
+                    if start != -1 and end != -1:
+                        coordinates_str = data[start + 1:end]
+                        coordinates = [float(coord) for coord in coordinates_str.split(',')]
+                        # Process the coordinates as needed
+                        meta_x, meta_y, meta_z = coordinates
+                        # Write Meta data to CSV 
+                        rowdata = [None,
+                            datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"), 
+                                    meta_x, 
+                                    meta_y, 
+                                    meta_z,
+                                    None,  # Lidar data placeholders
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None]
+                        with open(csv_filename, mode='a', newline='') as csvfile:
+                            csv_writer = csv.writer(csvfile)
+                            csv_writer.writerow(rowdata)
+                        print('Meta: {}'.format(datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")))
+
+            except Exception as e:
+                print(f"Error: {e}")
+            finally:
+                client_socket.close()
+                server_socket.close()
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+if __name__ == '__main__':
+    import sys
+    try:
+        # Load credentials
         with open(".credentials") as f:
             username = f.readline().strip()
             password = f.readline().strip()
@@ -100,57 +158,11 @@ if __name__ == '__main__':
         # Start Lidar data thread
         lidar_thread = threading.Thread(target=get_lidar_data)
         lidar_thread.start()
+        
+        # Start Metadata acquisition thread
+        metadata_thread = threading.Thread(target=get_metadata)
+        metadata_thread.start()
 
-        try:
-            while True:
-                server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                server_socket.bind((host, port))
-                server_socket.listen(1)
-
-                print(f"Listening for Unity on {host}:{port}")
-
-                client_socket, client_address = server_socket.accept()
-                print(f"Accepted connection from {client_address}")
-
-                try:
-                    while True:
-                        data = client_socket.recv(1024).decode('utf-8')
-                        if not data:
-                            break
-
-                        # Process data from Unity
-                        start = data.find('(')
-                        end = data.find(')')
-                        if start != -1 and end != -1:
-                            coordinates_str = data[start + 1:end]
-                            coordinates = [float(coord) for coord in coordinates_str.split(',')]
-                            # Process the coordinates as needed
-                            meta_x, meta_y, meta_z = coordinates
-                            # Write Meta data to CSV 
-                            rowdata = [None,
-                                datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"), 
-                                        meta_x, 
-                                        meta_y, 
-                                        meta_z,
-                                        None,  # Lidar data placeholders
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None]
-                            csv_writer.writerow(rowdata)
-                            print('Meta: {}'.format(datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")))
-
-                except Exception as e:
-                    print(f"Error: {e}")
-                finally:
-                    client_socket.close()
-                    server_socket.close()
-
-        except Exception as e:
-            print(f"Error: {e}")
-        finally:
-            lidar_thread.join()
+        # Join threads
+        lidar_thread.join()
+        metadata_thread.join()
