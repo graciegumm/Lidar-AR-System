@@ -9,6 +9,7 @@ import csv
 from datetime import datetime
 import socket
 import os
+import queue  # Import the queue module
 
 roslib.load_manifest('amrl_msgs')
 from amrl_msgs.msg import Point2D
@@ -38,29 +39,40 @@ def get_lidar_data():
             if rospy.is_shutdown() == False:
                 data = stream.get_frame()
                 print('Lidar: {}'.format(data.timestamp))
+
+                # Pop the most recent metadata item from the queue
+                try:
+                    meta_x, meta_y, meta_z, timestamp_meta = metadata_queue.get_nowait()
+                except queue.Empty:
+                    # If the queue is empty, no recent metadata available
+                    meta_x, meta_y, meta_z, timestamp_meta = None, None, None, None
+
+                # Retrieve the most recent metadata once outside the loop
+                # This metadata will be associated with all objects in data.objects
+                row_metadata = [timestamp_meta, meta_x, meta_y, meta_z]
+
                 for obj in data.objects:
                     obj.rotation = obj.rotation + sensorAngle
                     obj.centerX = obj.centerX + sensorLoc.x
                     obj.centerY = -obj.centerY + sensorLoc.y
-                    # Write object data to CSV 
-                    rowdata = [data.timestamp,
-                                None, 
-                                None,  # Meta data placeholders
-                                None, 
-                                None,
-                                obj.id,
-                                obj.centerX,
-                                obj.centerY,
-                                obj.width,
-                                obj.length,
-                                obj.rotation,
-                                obj.classType,
-                                obj.height]
-                    csv_writer.writerow(rowdata)
+
+                    # Check if closest metadata exists
+                    if timestamp_meta is not None:
+                        # Write object data to CSV with associated metadata
+                        rowdata = [data.timestamp,
+                                    *row_metadata,
+                                    obj.id,
+                                    obj.centerX,
+                                    obj.centerY,
+                                    obj.width,
+                                    obj.length,
+                                    obj.rotation,
+                                    obj.classType,
+                                    obj.height]
+                        csv_writer.writerow(rowdata)
 
     except Exception as e:
         print(f"Error: {e}")
-
 
 def get_meta_data():
     try:
@@ -89,24 +101,8 @@ def get_meta_data():
                         coordinates = [float(coord) for coord in coordinates_str.split(',')]
                         # Process the coordinates as needed
                         meta_x, meta_y, meta_z = coordinates
-                        # Write Meta data to CSV 
-                        rowdata = [None,
-                            datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"), 
-                                    meta_x, 
-                                    meta_y, 
-                                    meta_z,
-                                    None,  # Lidar data placeholders
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None]
-                        with open(csv_filename, mode='a', newline='') as csvfile:
-                            csv_writer = csv.writer(csvfile)
-                            csv_writer.writerow(rowdata)
-                        print('Meta: {}'.format(datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")))
+                        # Put metadata into the queue
+                        metadata_queue.put((meta_x, meta_y, meta_z, datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")))
 
             except Exception as e:
                 print(f"Error: {e}")
@@ -154,6 +150,9 @@ if __name__ == '__main__':
                              "LidarID", "LidarX", "LidarY", "Width", 
                              "Length", "Rotation", "ClassType", 
                              "Height"])
+
+        # Initialize the metadata queue
+        metadata_queue = queue.Queue()
 
         # Start Lidar data thread
         lidar_thread = threading.Thread(target=get_lidar_data)
