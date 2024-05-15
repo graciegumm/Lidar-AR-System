@@ -5,18 +5,20 @@ import sys
 import math
 import rospy, roslib
 from time import time
-import csv
-from datetime import datetime
 import socket
 import os
 import queue  # Import the queue module
 import numpy as np
-
+import time
+from datetime import datetime  # Import datetime module
 
 roslib.load_manifest('amrl_msgs')
 from amrl_msgs.msg import Point2D
 
+data_arrays = {}  # Global variable to store np arrays for each object id
+
 def get_lidar_data():
+    global data_arrays  # Declare data_arrays as global
     # Open Blucity stream
     print("Opening Blucity stream...")
     stream = BCTWSConnection(
@@ -34,7 +36,6 @@ def get_lidar_data():
     sensorLoc.x = 86
     sensorLoc.y = -120
     sensorAngle = math.radians(5)
-    data_arrays = {}  # Dictionary to store np arrays for each object id
     array_lengths = {}  # Dictionary to store the lengths of np arrays
     try:
         while True:
@@ -67,7 +68,7 @@ def get_lidar_data():
                         if array_name not in data_arrays:
                             data_arrays[array_name] = np.empty((0, 13), dtype=np.float64)  # Assuming 13 columns for the data
                             array_lengths[array_name] = 0
-                        # Write object data to CSV with associated metadata
+                        # Append rowdata to the respective array
                         rowdata = [data.timestamp,
                                     *row_metadata,
                                     obj.id,
@@ -78,17 +79,15 @@ def get_lidar_data():
                                     obj.rotation,
                                     obj.classType,
                                     obj.height]
-                        csv_writer.writerow(rowdata)
-                        # Append rowdata to the respective array
                         data_arrays[array_name] = np.append(data_arrays[array_name], [rowdata], axis=0)
                         # Update the length of the array
                         array_lengths[array_name] = len(data_arrays[array_name])
 
                 # Print out the number of items in the list of id+obj.id arrays
-                print("Number of id+obj.id arrays:", len(data_arrays))
+                #print("Number of id+obj.id arrays:", len(data_arrays))
 
             else:
-                # Stop writing to the CSV file and NumPy array when rospy is shut down
+                # Stop writing to the NumPy array when rospy is shut down
                 break
 
     except Exception as e:
@@ -132,6 +131,28 @@ def get_meta_data():
     except Exception as e:
         print(f"Error: {e}")
 
+def process_arrays(arrays):
+    # Placeholder for the processing logic
+    print("Processing arrays...")
+    # For demonstration purposes, let's print the shape of each array
+    for array_name, array_data in arrays.items():
+        print(f"{array_name}: {array_data.shape}")
+    # Placeholder for the logic to determine the correct ID
+    print("Determining correct ID...")
+
+def monitor_array_size():
+    global data_arrays
+    try:
+        while True:
+            for array_name, array_data in data_arrays.items():
+                print(f"{array_name}: {array_data.shape[0]}")
+                if array_data.shape[0] >= 150:
+                    process_arrays(data_arrays)
+                    return  # Exit the function if one array reaches 150 rows
+            time.sleep(1)  # Sleep for 1 second before checking again
+    except Exception as e:
+        print(f"Error: {e}")
+
 
 if __name__ == '__main__':
     import sys
@@ -150,39 +171,21 @@ if __name__ == '__main__':
     host = '0.0.0.0'  # Listen on all available interfaces
     port = 8888
 
-    # Get the current directory
-    current_directory = os.getcwd()
+    # Initialize the metadata queue
+    metadata_queue = queue.Queue()
 
-    # Specify the folder name
-    folder_name = 'rawdata'
+    # Start Lidar data thread
+    lidar_thread = threading.Thread(target=get_lidar_data)
+    lidar_thread.start()
+    
+    # Start Metadata acquisition thread
+    metadata_thread = threading.Thread(target=get_meta_data)
+    metadata_thread.start()
 
-    # Create the folder if it doesn't exist
-    folder_path = os.path.join(current_directory, folder_name)
-    os.makedirs(folder_path, exist_ok=True)
+    # Start a thread to monitor the size of each array
+    array_monitor_thread = threading.Thread(target=monitor_array_size)
+    array_monitor_thread.start()
 
-    # Open CSV file for writing in the "rawdata" folder
-    timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    csv_filename = os.path.join(folder_path, f'run_{timestamp_str}.csv')
-    # Initialize an empty NumPy array to store the data
-    with open(csv_filename, mode='w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        # Write header
-        csv_writer.writerow(["TimestampLidar", "TimestampMeta", "MetaX", "MetaY", "MetaZ", 
-                             "LidarID", "LidarX", "LidarY", "Width", 
-                             "Length", "Rotation", "ClassType", 
-                             "Height"])
-
-        # Initialize the metadata queue
-        metadata_queue = queue.Queue()
-
-        # Start Lidar data thread
-        lidar_thread = threading.Thread(target=get_lidar_data)
-        lidar_thread.start()
-        
-        # Start Metadata acquisition thread
-        metadata_thread = threading.Thread(target=get_meta_data)
-        metadata_thread.start()
-
-        # Join threads
-        lidar_thread.join()
-        metadata_thread.join()
+    # Join threads
+    lidar_thread.join()
+    metadata_thread.join()
