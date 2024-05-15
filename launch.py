@@ -10,6 +10,8 @@ from datetime import datetime
 import socket
 import os
 import queue  # Import the queue module
+import numpy as np
+
 
 roslib.load_manifest('amrl_msgs')
 from amrl_msgs.msg import Point2D
@@ -32,13 +34,14 @@ def get_lidar_data():
     sensorLoc.x = 86
     sensorLoc.y = -120
     sensorAngle = math.radians(5)
-
+    data_arrays = {}  # Dictionary to store np arrays for each object id
+    array_lengths = {}  # Dictionary to store the lengths of np arrays
     try:
         while True:
             # Get LiDAR data
             if rospy.is_shutdown() == False:
                 data = stream.get_frame()
-                print('Lidar: {}'.format(data.timestamp))
+                #print('Lidar: {}'.format(data.timestamp))
 
                 # Pop the most recent metadata item from the queue
                 try:
@@ -58,6 +61,12 @@ def get_lidar_data():
 
                     # Check if closest metadata exists
                     if timestamp_meta is not None:
+                        # Generate array name based on obj.id
+                        array_name = f"id{obj.id}"
+                        # Check if the array for this obj.id exists, if not, create it
+                        if array_name not in data_arrays:
+                            data_arrays[array_name] = np.empty((0, 13), dtype=np.float64)  # Assuming 13 columns for the data
+                            array_lengths[array_name] = 0
                         # Write object data to CSV with associated metadata
                         rowdata = [data.timestamp,
                                     *row_metadata,
@@ -70,6 +79,17 @@ def get_lidar_data():
                                     obj.classType,
                                     obj.height]
                         csv_writer.writerow(rowdata)
+                        # Append rowdata to the respective array
+                        data_arrays[array_name] = np.append(data_arrays[array_name], [rowdata], axis=0)
+                        # Update the length of the array
+                        array_lengths[array_name] = len(data_arrays[array_name])
+
+                # Print out the number of items in the list of id+obj.id arrays
+                print("Number of id+obj.id arrays:", len(data_arrays))
+
+            else:
+                # Stop writing to the CSV file and NumPy array when rospy is shut down
+                break
 
     except Exception as e:
         print(f"Error: {e}")
@@ -143,6 +163,7 @@ if __name__ == '__main__':
     # Open CSV file for writing in the "rawdata" folder
     timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     csv_filename = os.path.join(folder_path, f'run_{timestamp_str}.csv')
+    # Initialize an empty NumPy array to store the data
     with open(csv_filename, mode='w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         # Write header
