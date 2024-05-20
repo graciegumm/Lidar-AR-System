@@ -4,13 +4,13 @@ import threading
 import sys
 import math
 import rospy, roslib
-from time import time
 import socket
-import os
-import queue  # Import the queue module
+import queue
 import numpy as np
 import time
-from datetime import datetime  # Import datetime module
+from datetime import datetime
+from scipy.spatial import procrustes
+import csv
 
 roslib.load_manifest('amrl_msgs')
 from amrl_msgs.msg import Point2D
@@ -36,13 +36,11 @@ def get_lidar_data():
     sensorLoc.x = 86
     sensorLoc.y = -120
     sensorAngle = math.radians(5)
-    array_lengths = {}  # Dictionary to store the lengths of np arrays
     try:
         while True:
             # Get LiDAR data
             if rospy.is_shutdown() == False:
                 data = stream.get_frame()
-                #print('Lidar: {}'.format(data.timestamp))
 
                 # Pop the most recent metadata item from the queue
                 try:
@@ -50,11 +48,8 @@ def get_lidar_data():
                 except queue.Empty:
                     # If the queue is empty, no recent metadata available
                     meta_x, meta_y, meta_z, timestamp_meta = None, None, None, None
-
-                # Retrieve the most recent metadata once outside the loop
-                # This metadata will be associated with all objects in data.objects
+                # print('Lidar: {} \n Meta: {}'.format(data.timestamp, timestamp_meta))
                 row_metadata = [timestamp_meta, meta_x, meta_y, meta_z]
-
                 for obj in data.objects:
                     obj.rotation = obj.rotation + sensorAngle
                     obj.centerX = obj.centerX + sensorLoc.x
@@ -67,7 +62,6 @@ def get_lidar_data():
                         # Check if the array for this obj.id exists, if not, create it
                         if array_name not in data_arrays:
                             data_arrays[array_name] = np.empty((0, 13), dtype=np.float64)  # Assuming 13 columns for the data
-                            array_lengths[array_name] = 0
                         # Append rowdata to the respective array
                         rowdata = [data.timestamp,
                                     *row_metadata,
@@ -80,11 +74,6 @@ def get_lidar_data():
                                     obj.classType,
                                     obj.height]
                         data_arrays[array_name] = np.append(data_arrays[array_name], [rowdata], axis=0)
-                        # Update the length of the array
-                        array_lengths[array_name] = len(data_arrays[array_name])
-
-                # Print out the number of items in the list of id+obj.id arrays
-                #print("Number of id+obj.id arrays:", len(data_arrays))
 
             else:
                 # Stop writing to the NumPy array when rospy is shut down
@@ -111,7 +100,6 @@ def get_meta_data():
                     data = client_socket.recv(1024).decode('utf-8')
                     if not data:
                         break
-
                     # Process data from Unity
                     start = data.find('(')
                     end = data.find(')')
@@ -122,7 +110,6 @@ def get_meta_data():
                         meta_x, meta_y, meta_z = coordinates
                         # Put metadata into the queue
                         metadata_queue.put((meta_x, meta_y, meta_z, datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")))
-
             except Exception as e:
                 print(f"Error: {e}")
             finally:
@@ -132,13 +119,40 @@ def get_meta_data():
         print(f"Error: {e}")
 
 def process_arrays(arrays):
-    # Placeholder for the processing logic
     print("Processing arrays...")
+    lowest_disparity = float('inf')
+    best_array_info = None
     # For demonstration purposes, let's print the shape of each array
     for array_name, array_data in arrays.items():
-        print(f"{array_name}: {array_data.shape}")
+        if array_data.shape[0] >= 100:
+            processed_array = array_data[1:]
+            meta_coords = processed_array[:, [2, 4]].astype(float)
+            lidar_coords = processed_array[:, [6, 7]].astype(float)
+            # Apply Procrustes analysis
+            mtx1, mtx2, disparity = procrustes(meta_coords, lidar_coords)
+            # Store the processed array in the dictionary
+            if disparity < lowest_disparity:
+                lowest_disparity = disparity
+                best_array_info = (mtx1, mtx2, disparity, array_name, array_data)
+            # Print the first 2 rows of the processed array
+            #print(processed_array[:2])
+        #else:
+            #print(f"Ignoring: {array_name} (less than 100 rows)")
     # Placeholder for the logic to determine the correct ID
     print("Determining correct ID...")
+    if best_array_info:
+        mtx1, mtx2, disparity, array_name, array_data = best_array_info
+        print(f"Best Array Info: mtx1={mtx1}, mtx2={mtx2}, disparity={disparity}, id={array_name[2:]}, raw_data={array_data}")
+        csv_filename = f"{array_name}.csv"  # Modify the filename as needed
+        with open(csv_filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            # Write headers
+            writer.writerow(["LidarTimestamp", "MetaTimestamp", "MetaX", "MetaY", "MetaZ", "LidarID", "LidarX", "LidarY", "width", "length", "rotation", "classType", "height"])
+            # Write array_data to CSV
+            writer.writerows(array_data)
+    else:
+        print("No array with at least 100 rows found.")
+    return array_name[2:]
 
 def monitor_array_size():
     global data_arrays
@@ -172,7 +186,7 @@ if __name__ == '__main__':
     port = 8888
 
     # Initialize the metadata queue
-    metadata_queue = queue.Queue()
+    metadata_queue = queue.LifoQueue()
 
     # Start Lidar data thread
     lidar_thread = threading.Thread(target=get_lidar_data)
